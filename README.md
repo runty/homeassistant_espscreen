@@ -1,3 +1,14 @@
+> [!NOTE]
+> **Why this fork exists:** This is a personal Tessera fork for improving photo gradients on a Waveshare
+> ESP32-P4-WIFI6-Touch-LCD-4B. It includes higher-quality 720 × 720 screensaver JPEGs and an opt-in RGB888
+> firmware overlay for photos and camera video. The overlay includes calibration measured on one panel;
+> it is not a universal color profile. See [the P4 overlay notes](fork/wads-p4/README.md) for setup,
+> compatibility and the remaining limitations. Upstream Tessera is maintained at
+> [MaxGramser/homeassistant_espscreen](https://github.com/MaxGramser/homeassistant_espscreen).
+>
+> The development work is on this fork's `dev` branch; it is not an upstream release. The original Home Assistant
+> install button below still installs **upstream**, not this fork.
+
 > [!IMPORTANT]
 > # LOOKING FOR FUNDING
 >

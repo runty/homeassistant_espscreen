@@ -356,7 +356,7 @@ def corners_of(question, size):
     return tuple(found[:MAX_CORNERS])
 
 
-def encode(image, fmt='bmp24', corners=()):
+def encode(image, fmt='bmp24', corners=(), high_quality=False):
     """`image` in the format a screen takes: `bmp24`, `bmp8` (on a palette of the picture's own 256 colours, dithered so a
     shade stays smooth: a third of the bytes, at about the quality of an RGB565 glass; Pillow's fast octree keeps it cheap
     on a Raspberry Pi) or `jpeg` (baseline, for the ESP32-P4's hardware decoder)."""
@@ -369,7 +369,8 @@ def encode(image, fmt='bmp24', corners=()):
         rgb = image.convert('RGB')
         width, height = rgb.size
         padded = _whole_mcus(rgb)
-        padded.save(out, 'JPEG', quality=JPEG_QUALITY, optimize=True, progressive=False, subsampling='4:2:0')
+        padded.save(out, 'JPEG', quality=95 if high_quality else JPEG_QUALITY, optimize=True, progressive=False,
+                    subsampling='4:4:4' if high_quality else '4:2:0')
         body = out.getvalue()
         if padded.size == rgb.size and not corners:
             return body
@@ -388,4 +389,5 @@ def paint(question, raws, fmt=None):
     """The bytes a screen downloads for a question: its picture (picture()) in `fmt`, the question's own when not given."""
     image = picture(question, raws)
     fmt = fmt or question.format
-    return encode(image, fmt, corners_of(question, image.size) if fmt == 'jpeg' else ())
+    return encode(image, fmt, corners_of(question, image.size) if fmt == 'jpeg' else (),
+                  high_quality=question.owner.kind == 'saver' and question.box == (720, 720))

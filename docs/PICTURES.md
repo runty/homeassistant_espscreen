@@ -1,3 +1,10 @@
+# Fork: higher-quality 720 × 720 screensaver stills
+
+This fork uses baseline JPEG quality 95 and 4:4:4 chroma for 720 × 720 screensaver requests. Other stills and live
+video retain the upstream settings. A sample sky image was approximately 64% larger than quality 85/4:2:0 and the
+owner saw slightly less banding. JPEG is still lossy and the result depends on the source and screen. The optional
+[RGB888 P4 overlay](../fork/wads-p4/README.md) avoids reducing those pixels to RGB565 before display.
+
 # Pictures: one system, three routes
 
 Every picture a screen has to do with takes one of three routes, and the three share one vocabulary, one question and

@@ -1,0 +1,405 @@
+--- a/smart_display/glass.h
++++ b/smart_display/glass.h
+@@ -69,0 +70 @@
++  bool rgb888 = false;
+--- a/smart_display/glass_dsi.cpp
++++ b/smart_display/glass_dsi.cpp
+@@ -36,0 +37,3 @@
++  panel_facts.rgb888 = config->in_color_format == LCD_COLOR_FMT_RGB888 ||
++                       (config->in_color_format == 0 && config->pixel_format == LCD_COLOR_PIXEL_FORMAT_RGB888);
++  if (panel_facts.rgb888) panel_facts.swapped = false;
+@@ -39 +42 @@
+-bool direct() { return panel_handle != nullptr && panel_facts.rgb565 && bound(); }
++bool direct() { return panel_handle != nullptr && (panel_facts.rgb565 || panel_facts.rgb888) && bound(); }
+--- a/smart_display/live_view.cpp
++++ b/smart_display/live_view.cpp
+@@ -39 +39 @@
+-#include "wads-p4-color-transform.h"
++#include "wads-p4-rgb888-color.h"
+@@ -135,0 +136 @@
++  WadsP4Rgb888Map rgb888_cal;
+@@ -269,0 +271,4 @@
++#if defined(PICTURE_ENGINE_P4)
++  block.out_rgb888 = (out == glass::frame_buffer() || out == s.canvas) && glass::panel().rgb888;
++  block.in_rgb888 = (in == s.picture || in == s.canvas) && glass::panel().rgb888;
++#endif
+@@ -335,0 +341 @@
++  const int bpp = glass::panel().rgb888 ? 3 : 2;
+@@ -337,2 +343,3 @@
+-    memcpy(s.under + static_cast<size_t>(j) * size, s.canvas + static_cast<size_t>(at.y + j) * cw + at.x,
+-           static_cast<size_t>(size) * 2);
++    memcpy(reinterpret_cast<uint8_t *>(s.under) + static_cast<size_t>(j) * size * bpp,
++           reinterpret_cast<uint8_t *>(s.canvas) + (static_cast<size_t>(at.y + j) * cw + at.x) * bpp,
++           static_cast<size_t>(size) * bpp);
+@@ -340 +347,2 @@
+-  draw_loader(s.canvas, cw, at.x, at.y, s.look, s.turned_at);
++  if (bpp == 3) draw_loader888(reinterpret_cast<uint8_t *>(s.canvas), cw, at.x, at.y, s.look, s.turned_at);
++  else draw_loader(s.canvas, cw, at.x, at.y, s.look, s.turned_at);
+@@ -364,0 +373 @@
++  const int bpp = glass::panel().rgb888 ? 3 : 2;
+@@ -366,3 +375,5 @@
+-    memcpy(s.canvas + static_cast<size_t>(at.y + j) * cw + at.x, s.under + static_cast<size_t>(j) * size,
+-           static_cast<size_t>(size) * 2);
+-  draw_loader(s.canvas, cw, at.x, at.y, s.look, now);
++    memcpy(reinterpret_cast<uint8_t *>(s.canvas) + (static_cast<size_t>(at.y + j) * cw + at.x) * bpp,
++           reinterpret_cast<uint8_t *>(s.under) + static_cast<size_t>(j) * size * bpp,
++           static_cast<size_t>(size) * bpp);
++  if (bpp == 3) draw_loader888(reinterpret_cast<uint8_t *>(s.canvas), cw, at.x, at.y, s.look, now);
++  else draw_loader(s.canvas, cw, at.x, at.y, s.look, now);
+@@ -374 +385 @@
+-               static_cast<size_t>(panel.w) * panel.h * 2, panel.w, panel.h, target.x, target.y, picture_engine::AS_IS,
++               static_cast<size_t>(panel.w) * panel.h * (panel.rgb888 ? 3 : 2), panel.w, panel.h, target.x, target.y, picture_engine::AS_IS,
+@@ -417 +428,2 @@
+-  const size_t need = info.bytes;
++  const bool full_rgb888 = glass::panel().rgb888;
++  const size_t need = full_rgb888 ? info.bytes / 2 * 3 : info.bytes;
+@@ -438,0 +451,4 @@
++#if defined(PICTURE_ENGINE_P4)
++  const bool decoded = full_rgb888 ? picture_engine::decode_into_rgb888(data, length, s.picture, s.picture_size)
++                                  : picture_engine::decode_into(data, length, s.picture, s.picture_size);
++#else
+@@ -439,0 +456 @@
++#endif
+@@ -447,16 +464,7 @@
+-  // Full-screen JPEG streams bypass LVGL's calibrated flush. Correct this
+-  // private RGB565 frame before the PPA scales it; stills and tile streams
+-  // are untouched. Invalidate DMA output before CPU access, then write back
+-  // the changes before the PPA reads the frame.
+-  if (!s.look.tile) {
+-    if (!s.color_lut)
+-      s.color_lut = static_cast<uint16_t *>(heap_caps_malloc(65536 * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+-    if (s.color_lut && (s.lut_green != wads_p4_green_gain || s.lut_blue != wads_p4_blue_gain)) {
+-      const uint16_t green = wads_p4_green_gain, blue = wads_p4_blue_gain;
+-      for (uint32_t i = 0; i < 65536 && !s.stopping; ++i) {
+-        s.color_lut[i] = wads_p4_correct_pixel(static_cast<uint16_t>(i));
+-        if ((i & 4095) == 4095) vTaskDelay(1);
+-      }
+-      if (s.stopping) return;
+-      s.lut_green = green;
+-      s.lut_blue = blue;
++  // Apply the same RGB888 correction to camera frames before hardware scaling.
++  if (full_rgb888) {
++    auto &cal = s.rgb888_cal;
++    if (cal.green != wads_p4_green_gain || cal.blue != wads_p4_blue_gain) {
++      wads_p4_init_rgb888_map(cal);
++      cal.green = wads_p4_green_gain;
++      cal.blue = wads_p4_blue_gain;
+@@ -465,5 +473,3 @@
+-      auto *pixels = reinterpret_cast<uint16_t *>(s.picture);
+-      for (int y = 0; y < h; ++y) {
+-        auto *row = pixels + static_cast<size_t>(y) * stride_w;
+-        for (int x = 0; x < w; ++x)
+-          row[x] = s.color_lut ? s.color_lut[row[x]] : wads_p4_correct_pixel(row[x]);
++      for (int y=0; y<h; ++y) {
++        auto *row = s.picture + static_cast<size_t>(y) * stride_w * 3;
++        for (int x=0; x<w; ++x) wads_p4_correct_rgb888(row + x * 3, cal);
+@@ -472 +478 @@
+-        ESP_LOGW(TAG, "could not flush corrected full-screen frame");
++        ESP_LOGW(TAG, "could not flush RGB888 full-screen frame");
+@@ -474 +480 @@
+-      ESP_LOGW(TAG, "could not invalidate full-screen frame for color correction");
++      ESP_LOGW(TAG, "could not invalidate RGB888 full-screen frame");
+@@ -476,0 +483 @@
++
+@@ -482 +489 @@
+-  const size_t glass_size = static_cast<size_t>(panel.w) * panel.h * 2;
++  const size_t glass_size = static_cast<size_t>(panel.w) * panel.h * (panel.rgb888 ? 3 : 2);
+@@ -501,2 +508,3 @@
+-    uint16_t *card = reinterpret_cast<uint16_t *>(s.picture) + static_cast<size_t>(into.in_y) * stride_w + into.in_x;
+-    lay_overlay(card, stride_w, overlay_now(s));
++    const size_t card_at = static_cast<size_t>(into.in_y) * stride_w + into.in_x;
++    if (panel.rgb888) lay_overlay888(s.picture + card_at * 3, stride_w, overlay_now(s));
++    else lay_overlay(reinterpret_cast<uint16_t *>(s.picture) + card_at, stride_w, overlay_now(s));
+@@ -516 +524 @@
+-    const size_t canvas_need = (static_cast<size_t>(cw) * ch * 2 + 127) & ~static_cast<size_t>(127);
++    const size_t canvas_need = (static_cast<size_t>(cw) * ch * (panel.rgb888 ? 3 : 2) + 127) & ~static_cast<size_t>(127);
+@@ -528 +536,7 @@
+-    if (!into.covers(cw, ch)) memset(s.canvas, 0, static_cast<size_t>(cw) * ch * 2);
++    if (!into.covers(cw, ch)) {
++      memset(s.canvas, 0, static_cast<size_t>(cw) * ch * (panel.rgb888 ? 3 : 2));
++#if defined(PICTURE_ENGINE_P4)
++      if (esp_cache_msync(s.canvas, s.canvas_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M) != ESP_OK)
++        ESP_LOGW(TAG, "could not flush cleared tile canvas");
++#endif
++    }
+@@ -538 +552,2 @@
+-      lay_overlay(s.canvas, cw, overlay_now(s));
++      if (panel.rgb888) lay_overlay888(reinterpret_cast<uint8_t *>(s.canvas), cw, overlay_now(s));
++      else lay_overlay(s.canvas, cw, overlay_now(s));
+@@ -761 +776,7 @@
+-    if (!into.covers(cw, ch)) memset(s->canvas, 0, static_cast<size_t>(cw) * ch * 2);
++    if (!into.covers(cw, ch)) {
++      memset(s->canvas, 0, static_cast<size_t>(cw) * ch * (glass::panel().rgb888 ? 3 : 2));
++#if defined(PICTURE_ENGINE_P4)
++      if (esp_cache_msync(s->canvas, s->canvas_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M) != ESP_OK)
++        ESP_LOGW(TAG, "could not flush cleared camera canvas");
++#endif
++    }
+@@ -766,0 +788 @@
++    block.out_rgb888 = glass::panel().rgb888;
+@@ -789 +811 @@
+-  const size_t glass_size = static_cast<size_t>(panel.w) * panel.h * 2;
++  const size_t glass_size = static_cast<size_t>(panel.w) * panel.h * (panel.rgb888 ? 3 : 2);
+@@ -800 +822,2 @@
+-    lay_overlay(s.canvas, cw, overlay_now(s));
++    if (panel.rgb888) lay_overlay888(reinterpret_cast<uint8_t *>(s.canvas), cw, overlay_now(s));
++    else lay_overlay(s.canvas, cw, overlay_now(s));
+@@ -1017 +1040 @@
+-    s->canvas_size = (static_cast<size_t>(area.w) * area.h * 2 + 127) & ~static_cast<size_t>(127);
++    s->canvas_size = (static_cast<size_t>(area.w) * area.h * (glass::panel().rgb888 ? 3 : 2) + 127) & ~static_cast<size_t>(127);
+@@ -1077 +1100 @@
+-        heap_caps_malloc(static_cast<size_t>(look.loader) * look.loader * 2, MALLOC_CAP_SPIRAM));
++        heap_caps_malloc(static_cast<size_t>(look.loader) * look.loader * (glass::panel().rgb888 ? 3 : 2), MALLOC_CAP_SPIRAM));
+--- a/smart_display/live_view.h
++++ b/smart_display/live_view.h
+@@ -407,0 +408,22 @@
++  }
++}
++
++// RGB888 is packed in B, G, R byte order, as LVGL and the P4 JPEG decoder use it.
++inline void blend888(uint8_t *p, uint16_t color, unsigned alpha) {
++  if (!alpha) return;
++  const unsigned a = alpha >= 255 ? 256 : alpha + 1, b = 256 - a;
++  const unsigned r = (color >> 11) & 31, g = (color >> 5) & 63, bl = color & 31;
++  const unsigned c[3] = {(bl * 255 + 15) / 31, (g * 255 + 31) / 63, (r * 255 + 15) / 31};
++  for (int i = 0; i < 3; ++i) p[i] = (p[i] * b + c[i] * a) >> 8;
++}
++inline void lay_overlay888(uint8_t *px, int stride, const Overlay &o) {
++  if (o.shade_count > 0) {
++    if (o.shade_by_column) {
++      for (int y = 0; y < o.h; ++y)
++        for (int i = 0; i < o.shade_count; ++i)
++          blend888(px + (static_cast<size_t>(y) * stride + o.shade_from + i) * 3, 0, o.shade[i]);
++    } else {
++      for (int i = 0; i < o.shade_count; ++i)
++        for (int x = 0; x < o.w; ++x)
++          blend888(px + (static_cast<size_t>(o.shade_from + i) * stride + x) * 3, 0, o.shade[i]);
++    }
+@@ -408,0 +431,7 @@
++  for (int i = 0; i < o.count; ++i) {
++    const OverlaySegment &seg = o.segments[i];
++    for (int x = seg.from; x < seg.to; ++x) {
++      const int at = seg.at + x - seg.from;
++      blend888(px + (static_cast<size_t>(seg.y) * stride + x) * 3, o.color[at], o.alpha[at]);
++    }
++  }
+@@ -460,0 +490,35 @@
++    }
++  }
++}
++
++inline void draw_loader888(uint8_t *px, int stride, int x, int y, const Look &look, uint32_t ms) {
++  const int size = look.loader;
++  const float r = size / 2.0f;
++  const float outer = r - std::max(2.0f, size / 7.0f), inner = outer - look.loader_arc;
++  const float mid = (outer + inner) / 2, half = (outer - inner) / 2;
++  const float p = static_cast<float>(ms % LOADER_TURN_MS) / LOADER_TURN_MS;
++  const float eased = p * p * (3 - 2 * p);
++  const float start = 360 * eased, end = LOADER_ARC + 360 * p;  // degrees, clockwise from three o'clock
++  const float length = end - start;
++  constexpr float RAD = 3.14159265f / 180;
++  const float sx = mid * std::cos(start * RAD), sy = mid * std::sin(start * RAD);
++  const float ex = mid * std::cos(end * RAD), ey = mid * std::sin(end * RAD);
++  auto clamp01 = [](float v) { return v <= 0 ? 0.0f : v >= 1 ? 1.0f : v; };
++  for (int j = 0; j < size; ++j) {
++    for (int i = 0; i < size; ++i) {
++      const float dx = i + 0.5f - r, dy = j + 0.5f - r;
++      const float d = std::sqrt(dx * dx + dy * dy);
++      const float shade = clamp01(r - d + 0.5f);
++      if (shade <= 0) continue;
++      uint8_t *pixel = px + (static_cast<size_t>(y + j) * stride + x + i) * 3;
++      blend888(pixel, 0, static_cast<unsigned>(shade * LOADER_SHADE));
++      const float band = clamp01(std::min(outer - d, d - inner) + 0.5f);
++      if (band > 0) blend888(pixel, look.loader_ring, static_cast<unsigned>(band * 255));
++      float angle = std::atan2(dy, dx) / RAD - start;
++      while (angle < 0) angle += 360;
++      while (angle >= 360) angle -= 360;
++      float on = angle <= length ? band : 0;
++      const float cap_s = std::sqrt((dx - sx) * (dx - sx) + (dy - sy) * (dy - sy));
++      const float cap_e = std::sqrt((dx - ex) * (dx - ex) + (dy - ey) * (dy - ey));
++      on = std::max(on, clamp01(half - std::min(cap_s, cap_e) + 0.5f));
++      if (on > 0) blend888(pixel, look.loader_turn, static_cast<unsigned>(on * 255));
+--- a/smart_display/picture_engine.h
++++ b/smart_display/picture_engine.h
+@@ -56,0 +57 @@
++  bool in_rgb888 = false, out_rgb888 = false;
+@@ -206,0 +208,3 @@
++#if defined(PICTURE_ENGINE_P4)
++bool decode_into_rgb888(const uint8_t *data, size_t length, uint8_t *into, size_t into_size);
++#endif
+--- a/smart_display/picture_engine_p4.cpp
++++ b/smart_display/picture_engine_p4.cpp
+@@ -87,0 +88,7 @@
++bool decode_into_rgb888(const uint8_t *data, size_t length, uint8_t *into, size_t into_size) {
++  if (!decoder) return false;
++  jpeg_decode_cfg_t cfg = decode_cfg();
++  cfg.output_format = JPEG_DECODE_OUT_FORMAT_RGB888;
++  uint32_t written = 0;
++  return jpeg_decoder_process(decoder, &cfg, data, length, into, into_size, &written) == ESP_OK;
++}
+@@ -91,0 +99 @@
++  still.bytes = still.bytes / 2 * 3;
+@@ -103 +111,4 @@
+-  const bool decoded = decode_into(data, length, pixels, size);
++  jpeg_decode_cfg_t rgb888_cfg = decode_cfg();
++  rgb888_cfg.output_format = JPEG_DECODE_OUT_FORMAT_RGB888;
++  uint32_t written = 0;
++  const bool decoded = jpeg_decoder_process(decoder, &rgb888_cfg, data, length, pixels, size, &written) == ESP_OK;
+@@ -142 +153 @@
+-  srm.in.srm_cm = b.yuv420 ? PPA_SRM_COLOR_MODE_YUV420 : PPA_SRM_COLOR_MODE_RGB565;
++  srm.in.srm_cm = b.yuv420 ? PPA_SRM_COLOR_MODE_YUV420 : (b.in_rgb888 ? PPA_SRM_COLOR_MODE_RGB888 : PPA_SRM_COLOR_MODE_RGB565);
+@@ -153 +164 @@
+-  srm.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
++  srm.out.srm_cm = b.out_rgb888 ? PPA_SRM_COLOR_MODE_RGB888 : PPA_SRM_COLOR_MODE_RGB565;
+--- a/smart_display/picture_fetch.cpp
++++ b/smart_display/picture_fetch.cpp
+@@ -80,0 +81 @@
++  bool fresh_rgb888 = false;
+@@ -162,0 +164 @@
++    slot.fresh_rgb888 = false;
+@@ -234 +236 @@
+-        picture_jpeg::mask_corners(reinterpret_cast<uint16_t *>(pixels), still.stride, still.w, still.h, corner);
++        picture_jpeg::mask_corners_rgb888(pixels, still.stride, still.w, still.h, corner);
+@@ -241,0 +244 @@
++      slot.fresh_rgb888 = true;
+@@ -367,2 +370,2 @@
+-    slot.dsc.header.stride = static_cast<uint32_t>(slot.fresh_stride) * 2;
+-    slot.dsc.header.cf = LV_COLOR_FORMAT_RGB565;
++    slot.dsc.header.stride = static_cast<uint32_t>(slot.fresh_stride) * (slot.fresh_rgb888 ? 3 : 2);
++    slot.dsc.header.cf = slot.fresh_rgb888 ? LV_COLOR_FORMAT_RGB888 : LV_COLOR_FORMAT_RGB565;
+--- a/smart_display/picture_jpeg.h
++++ b/smart_display/picture_jpeg.h
+@@ -91,0 +92,20 @@
++inline void mask_corners_rgb888(uint8_t *pixels, int stride, int width, int height, const Corner &c) {
++  const int r = std::min(c.radius, std::min(c.w, c.h) / 2);
++  if (!pixels || r <= 0) return;
++  const float edge = r + 0.5f;
++  for (int dy = 0; dy < r; ++dy) {
++    const float across = r - dy - 0.5f;
++    const int out = std::max(0, std::min(r, static_cast<int>(std::ceil(r - std::sqrt(edge * edge - across * across) - 0.5f))));
++    for (const int y : {c.y + dy, c.y + c.h - 1 - dy}) {
++      if (y < 0 || y >= height) continue;
++      for (int i = 0; i < out; ++i)
++        for (const int x : {c.x + i, c.x + c.w - 1 - i})
++          if (x >= 0 && x < width) {
++            auto *p = pixels + (static_cast<size_t>(y) * stride + x) * 3;
++            p[0] = ((c.ground & 31) * 255 + 15) / 31;
++            p[1] = (((c.ground >> 5) & 63) * 255 + 31) / 63;
++            p[2] = (((c.ground >> 11) & 31) * 255 + 15) / 31;
++          }
++    }
++  }
++}
+--- a/smart_display/picture_store.h
++++ b/smart_display/picture_store.h
+@@ -65 +65 @@
+-                           std::sqrt(double(cap.bytes) / (2.0 * width * height))});
++                           std::sqrt(double(cap.bytes) / (3.0 * width * height))});
+--- a/lvgl/__init__.py
++++ b/lvgl/__init__.py
+@@ -500 +500 @@
+-    lv_image_formats = {"RGB565", "ARGB8888"}
++    lv_image_formats = {"RGB565", "RGB888", "ARGB8888"}
+--- a/lvgl/lvgl_esphome.cpp
++++ b/lvgl/lvgl_esphome.cpp
+@@ -1,0 +1 @@
++#include <cstring>
+@@ -342,12 +343,8 @@
+-  auto width = lv_area_get_width(area);
+-  auto height = lv_area_get_height(area);
+-  auto height_rounded = (height + this->draw_rounding - 1) / this->draw_rounding * this->draw_rounding;
+-  auto x1 = area->x1;
+-  auto y1 = area->y1;
+-  if (this->rotation_type_ == ROTATION_SOFTWARE) {
+-    lv_color_data *dst = reinterpret_cast<lv_color_data *>(this->rotate_buf_);
+-#ifdef USE_ESP32_VARIANT_ESP32P4
+-    bool ppa_done = this->ppa_client_ != nullptr && this->ppa_rotate_(ptr, dst, width, height, height_rounded);
+-    if (!ppa_done)
+-#endif
+-    {
++  auto width = lv_area_get_width(area), height = lv_area_get_height(area);
++  auto rounded = (height + this->draw_rounding - 1) / this->draw_rounding * this->draw_rounding;
++  auto x1 = area->x1, y1 = area->y1;
++  auto *src = reinterpret_cast<const uint8_t *>(ptr);
++  if (this->rotation_type_ == ROTATION_SOFTWARE && this->rotation_ != display::DISPLAY_ROTATION_0_DEGREES) {
++    auto *dst = reinterpret_cast<uint8_t *>(this->rotate_buf_);
++    for (lv_coord_t y = 0; y < height; ++y) for (lv_coord_t x = 0; x < width; ++x) {
++      size_t target = 0;
+@@ -355,27 +352,4 @@
+-        case display::DISPLAY_ROTATION_90_DEGREES:
+-          for (lv_coord_t x = height; x-- != 0;) {
+-            for (lv_coord_t y = 0; y != width; y++) {
+-              dst[y * height_rounded + x] = *ptr++;
+-            }
+-          }
+-          break;
+-
+-        case display::DISPLAY_ROTATION_180_DEGREES:
+-          for (lv_coord_t y = height; y-- != 0;) {
+-            for (lv_coord_t x = width; x-- != 0;) {
+-              dst[y * width + x] = *ptr++;
+-            }
+-          }
+-          break;
+-
+-        case display::DISPLAY_ROTATION_270_DEGREES:
+-          for (lv_coord_t x = 0; x != height; x++) {
+-            for (lv_coord_t y = width; y-- != 0;) {
+-              dst[y * height_rounded + x] = *ptr++;
+-            }
+-          }
+-          break;
+-
+-        default:
+-          dst = ptr;
+-          break;
++        case display::DISPLAY_ROTATION_90_DEGREES: target = static_cast<size_t>(x) * rounded + height - 1 - y; break;
++        case display::DISPLAY_ROTATION_180_DEGREES: target = static_cast<size_t>(height - 1 - y) * width + width - 1 - x; break;
++        case display::DISPLAY_ROTATION_270_DEGREES: target = static_cast<size_t>(width - 1 - x) * rounded + y; break;
++        default: break;
+@@ -382,0 +357 @@
++      std::memcpy(dst + target * 3, src + (static_cast<size_t>(y) * width + x) * 3, 3);
+@@ -384 +358,0 @@
+-    // Coordinate adjustments apply regardless of PPA or SW rotation
+@@ -386,21 +360,4 @@
+-      case display::DISPLAY_ROTATION_90_DEGREES:
+-        y1 = x1;
+-        x1 = this->width_ - area->y1 - height;
+-        height = width;
+-        width = height_rounded;
+-        break;
+-
+-      case display::DISPLAY_ROTATION_180_DEGREES:
+-        x1 = this->width_ - x1 - width;
+-        y1 = this->height_ - y1 - height;
+-        break;
+-
+-      case display::DISPLAY_ROTATION_270_DEGREES:
+-        x1 = y1;
+-        y1 = this->height_ - area->x1 - width;
+-        height = width;
+-        width = height_rounded;
+-        break;
+-
+-      default:
+-        break;
++      case display::DISPLAY_ROTATION_90_DEGREES: y1 = x1; x1 = this->width_ - area->y1 - height; height = width; width = rounded; break;
++      case display::DISPLAY_ROTATION_180_DEGREES: x1 = this->width_ - x1 - width; y1 = this->height_ - y1 - height; break;
++      case display::DISPLAY_ROTATION_270_DEGREES: x1 = y1; y1 = this->height_ - area->x1 - width; height = width; width = rounded; break;
++      default: break;
+@@ -408 +365 @@
+-    ptr = dst;
++    src = dst;
+@@ -410,4 +367,2 @@
+-  for (auto *display : this->displays_) {
+-    display->draw_pixels_at(x1, y1, width, height, (const uint8_t *) ptr, display::COLOR_ORDER_RGB, LV_BITNESS,
+-                            this->big_endian_);
+-  }
++  for (auto *display : this->displays_)
++    display->draw_pixels_at(x1, y1, width, height, src, display::COLOR_ORDER_RGB, display::COLOR_BITNESS_888, false);
+@@ -804 +759 @@
+-  auto buf_bytes = clamp_at_least(width * height / frac * LV_COLOR_DEPTH / 8, MIN_BUFFER_SIZE);
++  auto buf_bytes = clamp_at_least(width * height / frac * 3, MIN_BUFFER_SIZE);
+@@ -825 +780 @@
+-  lv_display_set_color_format(this->disp_, LV_COLOR_FORMAT_RGB565);
++  lv_display_set_color_format(this->disp_, LV_COLOR_FORMAT_RGB888);

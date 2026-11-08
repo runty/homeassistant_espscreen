@@ -1,0 +1,25 @@
+# Merge into an existing P4 override, keeping its existing includes/on_boot.
+# The gains and correction table are specific to one measured display.
+esphome:
+  includes:
+    - wads-p4-color-lut.h
+    - wads-p4-color-transform.h
+    - wads-p4-rgb888-color.h
+    - wads-p4-rgb888-warm.h
+  on_boot:
+    priority: -101
+    then:
+      - lambda: |-
+          lv_display_set_flush_cb(id(screen_lvgl).get_disp(), wads_p4_warm_flush);
+          lv_obj_invalidate(lv_screen_active());
+
+external_components:
+  - source:
+      type: local
+      path: wads-p4-vendor/components
+    components: [smart_display, lvgl]
+
+display:
+  - id: !extend my_display
+    color_depth: 24
+    pixel_mode: 24bit
