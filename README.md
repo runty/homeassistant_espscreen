@@ -6,7 +6,7 @@
 > compatibility and the remaining limitations. Upstream Tessera is maintained at
 > [MaxGramser/homeassistant_espscreen](https://github.com/MaxGramser/homeassistant_espscreen).
 >
-> The development work is on this fork's `dev` branch; it is not an upstream release. The original Home Assistant
+> The development work is on this fork's `codex/p4-rgb888` branch; it is not an upstream release. The original Home Assistant
 > install button below still installs **upstream**, not this fork.
 
 > [!IMPORTANT]
